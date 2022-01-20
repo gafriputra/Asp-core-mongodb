@@ -1,9 +1,9 @@
 ﻿using ApiSearch.Models;
 using ApiSearch.Services;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Bson;
-using MongoDB.Driver;
+using StackExchange.Redis;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace ApiSearch.Controllers
 {
@@ -12,10 +12,12 @@ namespace ApiSearch.Controllers
     public class BooksController : ControllerBase
     {
         private readonly BookService _bookService;
+        private readonly IDatabase _redis;
 
-        public BooksController(BookService bookService)
+        public BooksController(BookService bookService, IDatabase redis)
         {
             _bookService = bookService;
+            _redis = redis;
         }
 
         [HttpGet]
@@ -26,20 +28,13 @@ namespace ApiSearch.Controllers
         public ActionResult<Book> Get(string id)
         {
             var book = _bookService.Get(id);
-
-            if (book == null)
-            {
-                return NotFound();
-            }   
-
-            return book;
+            return book != null ? book : NotFound();
         }
 
         [HttpPost]
         public ActionResult<Book> Create(Book book)
         {
             _bookService.Create(book);
-
             return CreatedAtRoute("GetBook", new { id = book.Id.ToString() }, book);
         }
 
@@ -47,14 +42,11 @@ namespace ApiSearch.Controllers
         public IActionResult Update(string id, Book bookIn)
         {
             var book = _bookService.Get(id);
-
             if (book == null)
             {
                 return NotFound();
             }
-
             _bookService.Update(id, bookIn);
-
             return NoContent();
         }
 
@@ -62,14 +54,11 @@ namespace ApiSearch.Controllers
         public IActionResult Delete(string id)
         {
             var book = _bookService.Get(id);
-
             if (book == null)
             {
                 return NotFound();
             }
-
             _bookService.Remove(book.Id);
-
             return NoContent();
         }
 
@@ -80,7 +69,14 @@ namespace ApiSearch.Controllers
             [FromQuery(Name = "page")] int page
         )
         {
-            return Ok(_bookService.Query(s, sort, page));
+            string key = $"{s}_{sort}_{page.ToString()}";
+            var data = _redis.StringGet(key);
+            if (data.HasValue) {
+                return Ok(data.ToString());
+            }
+            var query = _bookService.Query(s, sort, page);
+            _redis.StringSet(key, JsonConvert.SerializeObject(query));
+            return Ok(query);
         }
 
     }
